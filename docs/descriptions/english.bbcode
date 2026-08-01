@@ -1,0 +1,33 @@
+[h1]Skin Squad[/h1]
+[b]Play solo. Look like a party.[/b]
+
+Stands visual-only companions beside you — in combat, around the campfire, and in the shop — laid out exactly where co-op teammates would stand. Give each one its own look: the vanilla art, any installed skin mod, or another character entirely.
+
+[h2]What it does[/h2]
+[list]
+[*][b]1–3 squad members[/b], placed with the game's own co-op geometry — front row beside you, extra members drifting up and to the left, distant ones greyed out.
+[*][b]Per-member appearance.[/b] Every character's vanilla look, every installed character skin mod, and any custom character. Two members of the same character can wear two different skins at once.
+[*][b]They move with you.[/b] Attack, cast, hurt and death play on the whole squad. Sprite-based custom characters are supported too, not just Spine ones.
+[*][b]Presets.[/b] Save a line-up per tab and switch between them — one squad for each character you play, instead of rebuilding it every run.
+[*][b]Pets are copied too.[/b] A Necrobinder squad member brings its own Osty rather than sharing yours.
+[*][b]In-game picker.[/b] A [b]Squad[/b] button on the character select screen opens a panel that plays a live idle of whatever look you hover.
+[*][b]14 languages.[/b]
+[/list]
+
+[h2]It cannot affect your run[/h2]
+Squad members are [b]not characters[/b]. Each one is a bare visual actor with no combat entity attached — no health bar, no intents, no targeting, and they never enter the combat state. Nothing is written to your run or your save. Purely cosmetic.
+
+[h2]Notes[/h2]
+[list]
+[*][b]Single-player only.[/b] It switches itself off automatically in co-op, and in fake-multiplayer solo-squad mods, since the game is already laying out several characters there.
+[*]Skin mods are read directly, never mounted, so they cannot conflict with each other or with Skin Manager. That is also what lets two members of one character wear different skins.
+[*][b]Skin Manager is not required[/b], but if you have it, the Squad button tucks into its panel.
+[*]A skin only changes the screens it ships art for. Most skin mods have a combat body only, so such a member wears its skin in combat and the stock look at the campfire and shop.
+[*]A character whose mod ships no animations at all will stand still; the picker says so before you choose it.
+[/list]
+
+[h2]Settings[/h2]
+Squad size and each member's look are set in the in-game Squad panel, per preset.
+The mod settings screen (RitsuLib or ModConfig; neither is required) carries only the two global switches: turn the squad on or off, and dim the back row.
+
+[b]Source code[/b]: [url=https://github.com/ing-gom/sts2-skin-squad]github.com/ing-gom/sts2-skin-squad[/url]

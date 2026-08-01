@@ -1,0 +1,32 @@
+<Project Sdk="Godot.NET.Sdk/4.5.1" InitialTargets="CheckSts2ModKit">
+    <!-- Sts2.ModKit, in priority order: the shared sibling checkout used in the multi-mod dev
+         tree, else the pinned external/Sts2.ModKit submodule that makes a standalone clone of
+         this repository build. Neither present -> readable error from CheckSts2ModKit below. -->
+    <Import Project="..\Sts2.ModKit\build\Sts2.ModKit.props"
+            Condition="Exists('..\Sts2.ModKit\build\Sts2.ModKit.props')" />
+    <Import Project="external\Sts2.ModKit\build\Sts2.ModKit.props"
+            Condition="'$(Sts2ModKitImported)' != 'true' And Exists('external\Sts2.ModKit\build\Sts2.ModKit.props')" />
+
+    <PropertyGroup>
+        <RootNamespace>Sts2SkinSquad</RootNamespace>
+        <AssemblyName>Sts2SkinSquad</AssemblyName>
+    </PropertyGroup>
+
+    <!-- The solo-verify harness is a development tool and must not reach a release build: it arms
+         itself off a flag file and would start its own run inside someone's game. Compiled out
+         entirely rather than merely disabled, so the shipped DLL carries neither the type nor the
+         flag-file literal. Verify with BOTH probes after a Release build (a .NET assembly splits
+         strings across two heaps, so one probe is only half a gate):
+             grep -a -c -P "s\x00e\x00l\x00f\x00t\x00e\x00s\x00t\x00" <dll>   # literals, UTF-16LE
+             grep -a -c -P "SoloTest" <dll>                                    # type names, UTF-8
+         Both must be 0. -->
+    <PropertyGroup Condition="'$(Configuration)' == 'Debug'">
+        <DefineConstants>$(DefineConstants);SKINSQUAD_SELFTEST</DefineConstants>
+    </PropertyGroup>
+    <ItemGroup Condition="'$(Configuration)' != 'Debug'">
+        <Compile Remove="Sts2SkinSquadCode\SoloTest.cs" />
+    </ItemGroup>
+    <Target Name="CheckSts2ModKit" BeforeTargets="PrepareForBuild" Condition="'$(Sts2ModKitImported)' != 'true'">
+        <Error Text="Sts2.ModKit not found. This repository pins it as a submodule: run 'git submodule update --init --recursive' and build again." />
+    </Target>
+</Project>

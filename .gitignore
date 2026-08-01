@@ -1,0 +1,31 @@
+# Godot 4+
+.godot/
+*.translation
+
+# .NET / Rider / VS / Claude Code
+bin/
+obj/
+.idea/
+.vs/
+.claude/
+*.user
+*.suo
+*.lscache
+
+# Local-only build overrides
+local.props
+
+# solo-verify / coop-verify runtime outputs
+selftest.*
+
+# Logs / runtime artifacts
+*.log
+
+# Release zips at repo root + staging dir used to build them
+/Sts2SkinSquad-v*.zip
+/_release_staging/
+
+# OS
+Thumbs.db
+.DS_Store
+__pycache__/
