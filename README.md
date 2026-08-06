@@ -5,7 +5,7 @@ combat, laid out exactly where co-op teammates would stand — so a solo run loo
 Each squad member gets its own look: the vanilla art, an installed skin mod, or another character
 entirely.
 
-Status: **v0.13.5** — published on the Steam Workshop
+Status: **v0.14.0** — published on the Steam Workshop
 ([3774905195](https://steamcommunity.com/sharedfiles/filedetails/?id=3774905195)).
 
 ## What it does
@@ -98,11 +98,13 @@ wrong size. The mod measures the stock body's skeleton bounds before the swap an
 **Character select screen → `Squad` button.** With Skin Manager installed the button mounts *inside* its menu bar, beside Save / Discard, so the two mods read as one panel and the button follows when that panel is dragged. Without it, the button anchors to the bottom-right near Embark and can be **dragged anywhere**; where
 you drop it is remembered. Inside the panel it is deliberately *not* draggable on its own — it is a
 row item there, and moves only when that panel is dragged. It opens a picker with one row per
-member: squad size at the top, then each member's look with a preview thumbnail and ◀ ▶ to cycle.
-This is the intended way to configure the mod — it shows you what you are choosing.
+member: squad size at the top, a **Swap front position** checkbox, then each member's look with a
+preview thumbnail and ◀ ▶ to cycle. This is the intended way to configure the mod — it shows you
+what you are choosing.
 
 The same values also appear in the game's mod settings (RitsuLib **or** ModConfig, whichever is
-installed; no hard dependency on either), which additionally exposes the two layout toggles:
+installed; no hard dependency on either), which additionally exposes the two layout toggles (Dim
+back rows and Give pets room):
 
 | Setting | Default | Meaning |
 |---|---|---|
@@ -111,6 +113,7 @@ installed; no hard dependency on either), which additionally exposes the two lay
 | Member 1/2/3 looks like | Same as me | `Self`, `Random`, a character, or an installed skin |
 | Give pets room | on | Push each member's pet clear of its body (off = the game's own overlapping placement for non-local players) |
 | Dim back rows | on | Grey out members behind the front row, as the game does for distant teammates |
+| Swap front position | off | Stand the first squad member in the front (main) spot and put the controlled character one place behind it — purely visual, you still control the same character |
 
 Settings live in `skin_squad.json` in the game's user data directory, and that file is the single
 source of truth. The settings framework can be read through `ModConfigBridge` but not written to, so
@@ -166,6 +169,10 @@ expected; `squadanim win` is the only way to see whether a given skin even has t
   else, so such a member wears its skin in combat and the stock look at the campfire and shop. The
   catalog logs which rigs each skin has (`name<Combat+RestSite>`).
 - The map screen still shows you alone.
+- **Swap front position** reorders the combat and shop formations, which the mod lays out as a
+  computed grid. The campfire keeps the controlled character in its first fixed slot: that screen
+  fills the game's own four slot containers rather than a grid, so swapping there would mean
+  reparenting the game's own actor.
 - Skin discovery matches a combat skeleton named after a vanilla character
   (`ironclad`, `silent`, `defect`, `watcher`, `regent`, `necrobinder`). Skeletons named anything else
   are ignored, which correctly skips monster and character-select rigs. Mods that ship under their

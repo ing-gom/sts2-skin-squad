@@ -42,6 +42,13 @@ internal static class SkinSquadService
     public static bool DimBackRows { get; set; } = true;
 
     /// <summary>
+    /// Position-swap mode: stand the first squad member in the front (main) spot and drop the
+    /// controlled character into the slot behind it. Purely visual — the played character is still
+    /// the one real <c>NCreature</c>, it just stands one place back. Off by default.
+    /// </summary>
+    public static bool SwapFront { get; set; } = false;
+
+    /// <summary>
     /// Saved line-ups. Never empty: the active preset IS the live configuration, so losing it would
     /// leave nothing for the combat code to read.
     /// </summary>
@@ -162,7 +169,8 @@ internal static class SkinSquadService
             scaling: _scaling,
             fullyCenterPlayers: _fullyCenterPlayers,
             localOstyOffset: ResolveOstyOffset(realPets),
-            dimBackRows: DimBackRows);
+            dimBackRows: DimBackRows,
+            swapFront: SwapFront);
 
         // Pets that already exist at room build time (rare — most are summoned later).
         foreach (NCreature pet in realPets) MirrorPet(pet.Entity);
@@ -608,7 +616,8 @@ internal static class SkinSquadService
             scaling: _scaling,
             fullyCenterPlayers: _fullyCenterPlayers,
             localOstyOffset: ResolveOstyOffset(_realSlot.Pets.Select(p => p.Node).OfType<NCreature>()),
-            dimBackRows: DimBackRows);
+            dimBackRows: DimBackRows,
+            swapFront: SwapFront);
     }
 
     private static float ReadCameraScaling(NCombatRoom room)

@@ -54,15 +54,39 @@ internal static class PartyLayout
     /// not use it — their Osty gets a reserved slot sized from its own width instead.
     /// </param>
     /// <param name="dimBackRows">Apply the game's grey-out to members behind the front row.</param>
+    /// <param name="swapFront">
+    /// Position-swap mode. When set (and a squad member exists), the first squad member is stood in
+    /// the front (main) spot and the controlled character drops into the slot immediately behind it.
+    /// </param>
     public static void Apply(
         IReadOnlyList<PartySlot> slots,
         float scaling,
         bool fullyCenterPlayers,
         Vector2? localOstyOffset,
-        bool dimBackRows)
+        bool dimBackRows,
+        bool swapFront = false)
     {
         if (slots.Count == 0) return;
         if (scaling <= 0f) scaling = 1f;
+
+        // ── Position-swap mode ─────────────────────────────────────────────────────────────────
+        // Index 0 is always the controlled character; index 1 is the first squad member. Swapping
+        // just those two entries stands the member in the front (main) spot and the played character
+        // one place behind it. It is only a reordering of the SAME slots: the real player keeps
+        // IsLocalReal, so its Osty hand-placement and its top-of-draw pinning travel with it to
+        // whatever position it lands in, and the member now at index 0 gets the ordinary member
+        // treatment. Index 1 falls in row 0 for every supported party size (2–4), so the played
+        // character never ends up dimmed as a back-row figure.
+        //
+        // Off by default. The solo-verify's assert M (no squad node right of, or drawn above, the
+        // player) only holds while this is off — which is the shipped default — because the whole
+        // point here is to place a member to the player's right.
+        if (swapFront && slots.Count >= 2)
+        {
+            var reordered = slots.ToList();
+            (reordered[0], reordered[1]) = (reordered[1], reordered[0]);
+            slots = reordered;
+        }
 
         float available = ReferenceHalfWidth / scaling;
         float spacing = DefaultSpacing;

@@ -225,6 +225,13 @@ internal static class SquadRooms
                 room._playerVisuals.Add(node);
             }
 
+            // Position-swap mode: stand the first double in the front grid spot and the played
+            // character behind it, matching the combat formation. members[0] is the real player's
+            // own shop visual, but LayoutShop only writes its Position — no reparenting — so
+            // reordering the list here is as safe as it is for a double.
+            if (SkinSquadService.SwapFront && members.Count >= 2)
+                (members[0], members[1]) = (members[1], members[0]);
+
             LayoutShop(members);
             MainFile.Logger.Info($"[{MainFile.ModId}] shop: party of {members.Count} placed.");
         }

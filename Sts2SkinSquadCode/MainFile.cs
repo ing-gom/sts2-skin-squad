@@ -19,6 +19,7 @@ public class MainFile
 
     private const string EntryKeyEnabled = "enabled";
     private const string EntryKeyDimBackRows = "dim_back_rows";
+    private const string EntryKeySwapFront = "swap_front";
 
     public static readonly MegaCrit.Sts2.Core.Logging.Logger Logger
         = ModBootstrap.CreateLogger(ModId);
@@ -75,6 +76,7 @@ public class MainFile
         // through the callbacks, which would otherwise clobber them before we can re-apply.
         bool enabled = SkinSquadService.Enabled;
         bool dim = SkinSquadService.DimBackRows;
+        bool swap = SkinSquadService.SwapFront;
 
         SquadConfig.Suppressed = true;
         try
@@ -103,6 +105,12 @@ public class MainFile
                 .Description(Strings.Get("cfg_dim_desc"));
             Localize(b, "cfg_dim_label", "cfg_dim_desc");
 
+            b.Toggle(EntryKeySwapFront, Strings.Get("cfg_swap_label"),
+                    defaultValue: swap,
+                    onChanged: v => { SkinSquadService.SwapFront = v; SquadConfig.Save(); })
+                .Description(Strings.Get("cfg_swap_desc"));
+            Localize(b, "cfg_swap_label", "cfg_swap_desc");
+
             b.Register();
         }
         finally
@@ -114,10 +122,11 @@ public class MainFile
         // authoritative here, because the in-game modal writes only to the file.
         SkinSquadService.Enabled = enabled;
         SkinSquadService.DimBackRows = dim;
+        SkinSquadService.SwapFront = swap;
 
         Logger.Info($"[{ModId}] active (enabled={SkinSquadService.Enabled}, count={SkinSquadService.DoubleCount}, " +
                     $"slots=[{string.Join(", ", SkinSquadService.SlotTokens)}], " +
-                    $"dimBackRows={SkinSquadService.DimBackRows}); " +
+                    $"dimBackRows={SkinSquadService.DimBackRows}, swapFront={SkinSquadService.SwapFront}); " +
                     $"{looks.Length} appearance option(s): [{string.Join(", ", looks)}].");
     }
 }

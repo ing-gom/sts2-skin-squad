@@ -40,6 +40,10 @@ internal static class SquadConfig
         public bool enabled { get; set; } = true;
         public bool dimBackRows { get; set; } = true;
 
+        /// <summary>Position-swap mode: first squad member takes the front (main) spot, the played
+        /// character stands behind it. Absent from older files, which deserialize it as false.</summary>
+        public bool swapFront { get; set; }
+
         /// <summary>Every saved line-up, in tab order. Absent from files written before presets
         /// existed, which is what the migration in <see cref="Load"/> keys off.</summary>
         public List<PresetDto> presets { get; set; } = new();
@@ -89,6 +93,7 @@ internal static class SquadConfig
 
             SkinSquadService.Enabled = dto.enabled;
             SkinSquadService.DimBackRows = dto.dimBackRows;
+            SkinSquadService.SwapFront = dto.swapFront;
             ButtonDelta = new Vector2(dto.buttonDx, dto.buttonDy);
 
             // The constructor clamps the count and pads the slot array, so a hand-edited or
@@ -137,6 +142,7 @@ internal static class SquadConfig
             {
                 enabled = SkinSquadService.Enabled,
                 dimBackRows = SkinSquadService.DimBackRows,
+                swapFront = SkinSquadService.SwapFront,
 
                 presets = SkinSquadService.Presets
                     .Select(p => new PresetDto

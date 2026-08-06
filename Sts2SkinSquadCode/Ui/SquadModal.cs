@@ -157,6 +157,7 @@ internal sealed partial class SquadModal : Control, IScreenContext
 
         column.AddChild(BuildPresetRow());
         column.AddChild(BuildSizeRow());
+        column.AddChild(BuildSwapRow());
         column.AddChild(new HSeparator());
 
         // Shown when the rows below have nothing to show, so an empty picker explains itself
@@ -294,6 +295,33 @@ internal sealed partial class SquadModal : Control, IScreenContext
         if (SkinSquadService.Presets.Count <= 1) return;
         SkinSquadService.Presets.RemoveAt(SkinSquadService.ActivePreset);
         SelectPreset(Math.Min(SkinSquadService.ActivePreset, SkinSquadService.Presets.Count - 1));
+    }
+
+    /// <summary>
+    /// Position-swap toggle. A global switch (like Dim back rows) rather than a per-preset value —
+    /// it lives on <see cref="SkinSquadService"/>, not on the active preset, so it reads the same in
+    /// every tab and is set once here. The picker is fresh-built on each open, so the initial state
+    /// comes straight from the service; the handler writes back and persists.
+    /// </summary>
+    private Control BuildSwapRow()
+    {
+        var row = new HBoxContainer();
+        row.AddThemeConstantOverride("separation", 8);
+
+        var check = new CheckBox
+        {
+            Text = Strings.Get("cfg_swap_label"),
+            ButtonPressed = SkinSquadService.SwapFront,
+            SizeFlagsHorizontal = SizeFlags.ExpandFill,
+            TooltipText = Strings.Get("cfg_swap_desc"),
+        };
+        check.Toggled += on =>
+        {
+            SkinSquadService.SwapFront = on;
+            SquadConfig.Save();
+        };
+        row.AddChild(check);
+        return row;
     }
 
     private Control BuildSizeRow()
