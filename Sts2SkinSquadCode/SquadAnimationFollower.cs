@@ -83,7 +83,7 @@ internal static class SquadAnimationFollower
                 // Already there via the trigger hook on the normal path — do not restart it, that
                 // would cut the animation back to frame zero.
                 if (CurrentAnimation(follower.Visuals) == playing) continue;
-                follower.Visuals.SpineAnimation.SetAnimation(playing, loop);
+                SpineCompat.Play(follower.Visuals.SpineAnimation, playing, loop);
             }
         }
         catch (Exception ex)
@@ -98,8 +98,9 @@ internal static class SquadAnimationFollower
         try
         {
             if (!visuals.HasSpineAnimation) return "";
-            MegaTrackEntry? track = visuals.SpineAnimation.GetCurrentTrack();
-            return track?.GetAnimation()?.GetName() ?? "";
+            // Value-returning accessor rather than GetCurrentTrack()?.GetAnimation()?.GetName():
+            // the chain leaves two wrappers for the finalizer, which v0.110.0 made unsafe.
+            return visuals.SpineAnimation.GetCurrentAnimationName() ?? "";
         }
         catch { return ""; }
     }

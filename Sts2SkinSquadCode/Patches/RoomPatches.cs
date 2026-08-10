@@ -8,11 +8,23 @@ namespace Sts2SkinSquad.Patches;
 
 /// <summary>
 /// Adds the squad to the campfire once the room has built its own single character.
+///
+/// ★A FINALIZER, NOT A POSTFIX. <c>_Ready</c> creates the character containers and fills slot 0
+/// before it calls <c>UpdateRestSiteOptions()</c>, which asks every registered rest-site option
+/// whether it is enabled — including options belonging to other mods. One of those throwing takes
+/// the rest of <c>_Ready</c> with it, and a postfix never runs, so the campfire silently shows one
+/// character while combat and the shop show the whole squad. Observed on public-beta v0.110.1,
+/// where a sister mod built against v0.107.1 threw <c>MissingMethodException</c> from its reforge
+/// option and cost this screen entirely.
+///
+/// A finalizer runs either way, and everything the squad needs already exists by then. The
+/// original exception is returned untouched — this makes the squad robust to a neighbour's
+/// failure, it does not hide it.
 /// </summary>
 [HarmonyPatch(typeof(NRestSiteRoom), "_Ready")]
 public static class NRestSiteRoomPatch
 {
-    public static void Postfix(NRestSiteRoom __instance)
+    public static Exception? Finalizer(NRestSiteRoom __instance, Exception? __exception)
     {
         try
         {
@@ -22,6 +34,8 @@ public static class NRestSiteRoomPatch
         {
             MainFile.Logger.Warn($"[{MainFile.ModId}] rest site hook failed: {ex.Message}");
         }
+
+        return __exception;
     }
 }
 

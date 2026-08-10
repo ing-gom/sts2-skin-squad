@@ -46,7 +46,15 @@ internal static class SpineSwap
     /// <paramref name="restartAnimation"/> being optional: pass null to leave whatever the caller
     /// already started playing.
     /// </summary>
-    public static bool ApplyToSprite(Node2D body, string atlasPath, string skeletonPath, string? restartAnimation)
+    /// <param name="normalizeScale">
+    /// Rescale the swapped body to the height of the one it replaces. True everywhere the mod
+    /// stands a double next to the real character and the two must read as the same scale.
+    /// <para/>
+    /// ★False on the merchant screen, deliberately: there each look is wanted at the size its
+    /// author drew it, so nothing is measured and nothing is corrected.
+    /// </param>
+    public static bool ApplyToSprite(Node2D body, string atlasPath, string skeletonPath, string? restartAnimation,
+                                     bool normalizeScale = true)
     {
         try
         {
@@ -57,7 +65,8 @@ internal static class SpineSwap
 
             // Measure the stock body first, in the pose we will compare against.
             if (restartAnimation != null) SetAnimation(body, restartAnimation);
-            float stockHeight = MeasureHeight(body);
+            float stockHeight = normalizeScale ? MeasureHeight(body) : 0f;
+            float stockFoot = normalizeScale ? MeasureFootLine(body) : 0f;
             string? playing = restartAnimation ?? CurrentAnimation(body);
 
             body.Call("set_skeleton_data_res", data);
@@ -66,7 +75,19 @@ internal static class SpineSwap
             // actor freezes in its setup pose.
             if (playing != null) SetAnimation(body, playing);
 
-            NormalizeScale(body, stockHeight);
+            if (normalizeScale)
+            {
+                NormalizeScale(body, stockHeight);
+                AlignFootLine(body, stockFoot);
+
+                // ★And again once the new skeleton has actually posed itself. Binding skeleton data
+                //  resets the animation state, so the measurement taken on the next line can still
+                //  be reading the OLD pose — which reports "already aligned" and leaves the body
+                //  wherever the swap put it (measured: one rig 178px off, with no correction
+                //  logged because the inline delta came out as zero). The correction is computed
+                //  against a fixed target, so repeating it converges rather than compounds.
+                ScheduleFootLineRecheck(body, stockFoot);
+            }
             return true;
         }
         catch (Exception ex)
@@ -78,13 +99,13 @@ internal static class SpineSwap
 
     private static void SetAnimation(Node2D spineSprite, string name)
     {
-        try { new MegaSprite(spineSprite).GetAnimationState().SetAnimation(name); }
+        try { SpineCompat.PlayOnSprite(spineSprite, name); }
         catch (Exception ex) { MainFile.Logger.Warn($"[{MainFile.ModId}] could not play '{name}': {ex.Message}"); }
     }
 
     private static string? CurrentAnimation(Node2D spineSprite)
     {
-        try { return new MegaSprite(spineSprite).GetAnimationState().GetCurrent(0)?.GetAnimation()?.GetName(); }
+        try { return SpineCompat.CurrentAnimationName(spineSprite); }
         catch { return null; }
     }
 
@@ -180,7 +201,7 @@ internal static class SpineSwap
             }
 
             MegaAnimationState state = mega.GetAnimationState();
-            state.SetAnimation(animation, true);
+            SpineCompat.Play(state, animation, true);
             state.Update(0f);
             MegaSkeleton? skeleton = mega.GetSkeleton();
             if (skeleton != null) state.Apply(skeleton);
@@ -222,6 +243,61 @@ internal static class SpineSwap
         return found;
     }
 
+    /// <summary>
+    /// Bounds at a common reference pose: the first frame of whatever the sprite is playing,
+    /// applied before measuring.
+    ///
+    /// ★WHY NOT <see cref="MeasureBounds"/>. Bounds are the CURRENT pose, and every rig is
+    /// animating. Measured on the installed set, one look's silhouette swings 1.42x over a single
+    /// idle — more than the difference between different looks. Anything that compares one rig's
+    /// size against another's therefore has to pin them to the same frame first, or it is mostly
+    /// reading animation phase. Two rigs still differ in how their own animation moves after this
+    /// point; that is the art, not a scale error.
+    ///
+    /// Update(0)+Apply is the game's own idiom for making a just-set animation actually pose the
+    /// skeleton — <c>CreatureAnimator</c> does it before it reads a track.
+    ///
+    /// ★The track time is put back afterwards. The game starts looping idles at a RANDOM phase on
+    /// purpose (<c>NMerchantCharacter.PlayAnimation</c> seeds it from <c>Rng.Chaotic</c>) so a row
+    /// of actors does not breathe in lockstep; measuring must not quietly undo that.
+    /// </summary>
+    public static Rect2 MeasureBoundsAtStart(Node2D spineSprite)
+    {
+        try
+        {
+            var mega = new MegaSprite(spineSprite);
+            MegaAnimationState state = mega.GetAnimationState();
+            MegaSkeleton? skeleton = mega.GetSkeleton();
+            if (skeleton == null) return new Rect2();
+
+            MegaTrackEntry? track = state.GetCurrent(0);
+            if (track == null) return MeasureBounds(spineSprite);   // nothing playing yet
+
+            float resume = track.GetTrackTime();
+            try
+            {
+                track.SetTrackTime(0f);
+                state.Update(0f);
+                state.Apply(skeleton);
+                Rect2 bounds = skeleton.GetBounds();
+
+                track.SetTrackTime(resume);
+                state.Update(0f);
+                state.Apply(skeleton);
+                return bounds;
+            }
+            finally { SpineCompat.Release(track); }
+        }
+        catch { return new Rect2(); }
+    }
+
+    /// <summary>Animation currently on track 0 of a bare SpineSprite, or "" when none.</summary>
+    public static string CurrentAnimationOn(Node2D spineSprite)
+    {
+        try { return SpineCompat.CurrentAnimationName(spineSprite) ?? ""; }
+        catch { return ""; }
+    }
+
     /// <summary>Skeleton-local bounds of the current pose, or a zero rect when unavailable.</summary>
     public static Rect2 MeasureBounds(Node2D spineSprite)
     {
@@ -243,10 +319,91 @@ internal static class SpineSwap
     }
 
     /// <summary>Skeleton-local bounds height of the current pose, or 0 when unavailable.</summary>
+    /// <summary>
+    /// Where this body's lowest point sits, in the parent's coordinates — its ground line.
+    ///
+    /// <c>get_bounds</c> returns a Godot-space rect, so the BOTTOM edge is
+    /// <c>Position.Y + Size.Y</c>; <c>Position.Y</c> alone is the top of the head.
+    /// </summary>
+    private static float MeasureFootLine(Node2D spineSprite)
+    {
+        try
+        {
+            Rect2 bounds = MeasureBoundsAtStart(spineSprite);
+            if (bounds.Size.Y <= 1f) return float.NaN;
+            return spineSprite.Position.Y + (bounds.Position.Y + bounds.Size.Y) * spineSprite.Scale.Y;
+        }
+        catch { return float.NaN; }
+    }
+
+    /// <summary>
+    /// Puts the swapped body's feet back where the stock body's feet were.
+    ///
+    /// ★WHY NORMALISING THE HEIGHT IS NOT ENOUGH. A body is placed by its node origin, and every
+    /// skeleton hangs from that origin differently — so two rigs of identical height can have
+    /// their ground lines hundreds of pixels apart, and rescaling one multiplies its offset on top
+    /// of that. The result is a companion standing in mid-air (measured: 311px above the vanilla
+    /// ground line for one Necrobinder skin) while every height check passes, because height
+    /// simply cannot see it.
+    ///
+    /// ★Implausible corrections are ignored, for the same reason NormalizeScale ignores implausible
+    /// ratios: a skeleton caught mid-load reports a nonsense rect, and teleporting a body by
+    /// thousands of pixels is far worse than leaving it where it was.
+    /// </summary>
+    private static void AlignFootLine(Node2D body, float stockFoot)
+    {
+        string who = body.GetParent()?.Name.ToString() ?? body.Name.ToString();
+
+        float newFoot = MeasureFootLine(body);
+        if (float.IsNaN(stockFoot) || float.IsNaN(newFoot))
+        {
+            MainFile.Logger.Info($"[{MainFile.ModId}] '{who}': no usable ground line; leaving the body where it is.");
+            return;
+        }
+
+        float delta = stockFoot - newFoot;
+        if (Math.Abs(delta) < 0.5f) return;
+
+        if (Math.Abs(delta) > MaxFootCorrection)
+        {
+            MainFile.Logger.Warn($"[{MainFile.ModId}] '{who}': implausible ground-line shift {delta:F0}px; leaving the body where it is.");
+            return;
+        }
+
+        body.Position = new Vector2(body.Position.X, body.Position.Y + delta);
+        MainFile.Logger.Info($"[{MainFile.ModId}] '{who}': ground line aligned by {delta:F0}px.");
+    }
+
+    /// <summary>A skin standing more than this far off the stock ground line is a bad measurement.</summary>
+    private const float MaxFootCorrection = 2000f;
+
+    /// <summary>Re-checks the ground line on later frames, once the swapped skeleton has posed itself.</summary>
+    private static void ScheduleFootLineRecheck(Node2D body, float stockFoot)
+    {
+        if (float.IsNaN(stockFoot) || Engine.GetMainLoop() is not SceneTree tree) return;
+
+        foreach (double delay in FootRecheckDelaysSec)
+        {
+            SceneTreeTimer timer = tree.CreateTimer(delay);
+            timer.Timeout += () =>
+            {
+                if (GodotObject.IsInstanceValid(body)) AlignFootLine(body, stockFoot);
+            };
+        }
+    }
+
+    private static readonly double[] FootRecheckDelaysSec = { 0.25, 0.75 };
+
     private static float MeasureHeight(Node2D spineSprite)
     {
         try
         {
+            // ★At the reference pose, not the live one. This number is one half of the stock/skin
+            // ratio, and both halves have to be read at the same frame or the ratio is mostly
+            // animation phase — one installed rig swings 1.42x over its own idle.
+            float atStart = MeasureBoundsAtStart(spineSprite).Size.Y;
+            if (atStart > 1f) return atStart;
+
             GodotObject? skeleton = spineSprite.Call("get_skeleton").AsGodotObject();
             if (skeleton == null) return 0f;
             return skeleton.Call("get_bounds").AsRect2().Size.Y;

@@ -67,6 +67,17 @@ internal static class SquadConfig
     private static string Path_ =>
         System.IO.Path.Combine(SafeUserDir(), FileName);
 
+    /// <summary>
+    /// Where the settings live, for the solo-verify harness to snapshot and put back.
+    ///
+    /// ★The harness drives real presets to exercise the picker and the rooms, and
+    /// <see cref="SkinSquadService.SlotTokens"/> hands out the ACTIVE PRESET'S OWN ARRAY — so those
+    /// writes land in the player's saved squad, and any later Save() (opening the picker is enough)
+    /// makes them permanent. It did: a test-only look ended up in slot 0 of a real preset. A test
+    /// must not be able to edit the settings of the machine it runs on.
+    /// </summary>
+    internal static string FilePath => Path_;
+
     private static string SafeUserDir()
     {
         try

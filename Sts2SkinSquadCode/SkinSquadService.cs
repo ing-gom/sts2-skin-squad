@@ -348,7 +348,7 @@ internal static class SkinSquadService
 
     private static void StartIdle(NCreatureVisuals visuals)
     {
-        if (visuals.HasSpineAnimation) visuals.SpineAnimation.SetAnimation(IdleAnimation, loop: true);
+        if (visuals.HasSpineAnimation) SpineCompat.Play(visuals.SpineAnimation, IdleAnimation, loop: true);
     }
 
     /// <summary>

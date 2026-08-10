@@ -5,7 +5,7 @@ combat, laid out exactly where co-op teammates would stand — so a solo run loo
 Each squad member gets its own look: the vanilla art, an installed skin mod, or another character
 entirely.
 
-Status: **v0.13.5** — published on the Steam Workshop
+Status: **v0.13.7** — published on the Steam Workshop
 ([3774905195](https://steamcommunity.com/sharedfiles/filedetails/?id=3774905195)).
 
 ## What it does

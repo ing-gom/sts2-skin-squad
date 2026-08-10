@@ -85,6 +85,21 @@ internal sealed partial class SkinPreview : Control
     }
 
     /// <summary>
+    /// The height normalisation actually landed on, recorded at fit time. 0 until a figure has been
+    /// fitted.
+    ///
+    /// ★Why this exists alongside <see cref="FittedHeight"/>: that one re-measures the skeleton
+    /// live, and the figure is playing its idle, so it reports the CURRENT pose. Measured on
+    /// v0.110.1, one look's silhouette swings 1.42x over a single idle cycle — more than the
+    /// spread between different looks. Comparing looks by live height therefore says almost
+    /// nothing about whether they were normalised, which is the property the panel exists to
+    /// guarantee (and the one that regressed in v0.10.1). This value is deterministic per look.
+    /// </summary>
+    public float NormalizedHeight() => _normalizedHeight;
+
+    private float _normalizedHeight;
+
+    /// <summary>
     /// Empties the panel outright — figure, portrait and caption.
     ///
     /// Distinct from Show(null): with no squad members there is nothing to preview at all, and
@@ -243,6 +258,7 @@ internal sealed partial class SkinPreview : Control
         float fit = Size.Y * FillRatio / naturalHeight;
         if (fit <= 0.001f || fit >= 1000f) return;
         _figure.Scale = new Vector2(fit, fit);
+        _normalizedHeight = naturalHeight * fit;
 
         // Vertical from the measured rect, horizontal from the rig's own origin.
         //
@@ -313,5 +329,8 @@ internal sealed partial class SkinPreview : Control
             _figure.QueueFree();
         }
         _figure = null;
+        // Cleared with the figure, so a look that never fits reads 0 instead of inheriting the
+        // previous look's number.
+        _normalizedHeight = 0f;
     }
 }

@@ -26,6 +26,14 @@
     <ItemGroup Condition="'$(Configuration)' != 'Debug'">
         <Compile Remove="Sts2SkinSquadCode\SoloTest.cs" />
     </ItemGroup>
+    <!-- The pinned submodule sits INSIDE this project's directory, so the SDK's default **/*.cs glob
+         reaches into it. Its sources are already supplied by the ProjectReference, and once anyone
+         builds the kit in place its obj/ carries a generated AssemblyInfo.cs whose attributes then
+         collide with ours (CS0579, standalone clone only). Keep the glob out of there entirely. -->
+    <ItemGroup>
+        <Compile Remove="external\**" />
+    </ItemGroup>
+
     <Target Name="CheckSts2ModKit" BeforeTargets="PrepareForBuild" Condition="'$(Sts2ModKitImported)' != 'true'">
         <Error Text="Sts2.ModKit not found. This repository pins it as a submodule: run 'git submodule update --init --recursive' and build again." />
     </Target>

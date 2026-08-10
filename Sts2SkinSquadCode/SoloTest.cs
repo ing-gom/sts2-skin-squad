@@ -23,6 +23,7 @@ using MegaCrit.Sts2.Core.Models;
 using MegaCrit.Sts2.Core.Nodes;
 using MegaCrit.Sts2.Core.Nodes.Combat;
 using MegaCrit.Sts2.Core.Nodes.Rooms;
+using MegaCrit.Sts2.Core.Nodes.Screens.Shops;
 using MegaCrit.Sts2.Core.Nodes.CommonUi;
 using MegaCrit.Sts2.Core.Nodes.Screens.CharacterSelect;
 using MegaCrit.Sts2.Core.Nodes.Screens.MainMenu;
@@ -46,12 +47,55 @@ internal static class SoloTest
 
     private static string ModDir() => Path.GetDirectoryName(typeof(SoloTest).Assembly.Location) ?? ".";
 
+    /// <summary>The player's squad settings as they were before this test ran; null if there were none.</summary>
+    private static string? _settingsBackup;
+    private static bool _settingsExisted;
+
+    /// <summary>
+    /// Remembers the settings file so <see cref="RestoreSettings"/> can put it back.
+    ///
+    /// ★WHY. This harness assigns presets and slots to drive the picker and the rooms, and
+    /// <c>SkinSquadService.SlotTokens</c> is the ACTIVE PRESET'S array — so those assignments are
+    /// edits to the player's real squad, and one later <c>SquadConfig.Save()</c> (opening the
+    /// picker does it) writes them to disk. It happened: a shop-rig test look was left sitting in
+    /// slot 0 of a named preset, and the player saw a companion they had never chosen.
+    /// </summary>
+    private static void SnapshotSettings()
+    {
+        try
+        {
+            string path = SquadConfig.FilePath;
+            _settingsExisted = File.Exists(path);
+            _settingsBackup = _settingsExisted ? File.ReadAllText(path) : null;
+            W($"settings snapshot taken ({(_settingsExisted ? $"{_settingsBackup!.Length} bytes" : "no file yet")})");
+        }
+        catch (Exception e) { W("settings snapshot failed: " + e.Message); }
+    }
+
+    /// <summary>Puts the player's squad settings back exactly as they were.</summary>
+    private static void RestoreSettings()
+    {
+        try
+        {
+            string path = SquadConfig.FilePath;
+            if (_settingsExisted && _settingsBackup != null) File.WriteAllText(path, _settingsBackup);
+            else if (!_settingsExisted && File.Exists(path)) File.Delete(path);
+
+            // In-memory too: the game keeps running after the test, and a later Save() from the
+            // picker would otherwise write the test's presets straight back out.
+            SquadConfig.Load();
+            W("settings restored");
+        }
+        catch (Exception e) { W("settings restore failed: " + e.Message); }
+    }
+
     public static void ArmIfRequested()
     {
         try
         {
             if (!File.Exists(Path.Combine(ModDir(), "selftest.sp.flag"))) return;
             W("solo selftest armed");
+            SnapshotSettings();
             Poll();
         }
         catch (Exception e) { Log($"solo arm failed: {e.Message}"); }
@@ -136,6 +180,54 @@ internal static class SoloTest
     }
 
     /// <summary>
+    /// How far the body's lowest point sits BELOW its node origin, in on-screen pixels.
+    ///
+    /// This is the number that decides whether an actor looks planted: the game places every body
+    /// by its origin, so two rigs whose skeletons hang differently from that origin end up at
+    /// different heights from identical coordinates. Spine's Y axis points up and Godot's points
+    /// down, so the bounds rect's own Position.Y is the offset of its BOTTOM edge, negated.
+    /// </summary>
+    private static float FootOffset(NCreatureVisuals visuals)
+    {
+        try
+        {
+            if (visuals.GetNodeOrNull<Node2D>("%Visuals") is not { } body) return 0f;
+            if (body.GetClass() != "SpineSprite") return 0f;
+            // ★Reference pose, the same one SpineSwap aligns on. Read live instead and a rig
+            // whose idle swings a lot (1.42x measured) reports a ground line that has nothing to
+            // do with where it was placed.
+            Rect2 bounds = SpineSwap.MeasureBoundsAtStart(body);
+            if (bounds.Size.Y <= 1f) return 0f;
+
+            // Bottom edge — Position.Y alone is the top of the head, which is not what "floating"
+            // means. Body position included: the swap shifts it to align the ground line.
+            return body.Position.Y + (bounds.Position.Y + bounds.Size.Y) * body.Scale.Y;
+        }
+        catch { return 0f; }
+    }
+
+    /// <summary>Foot offset before this mod's rescale — the skeleton's own authored value.</summary>
+    private static float FootOffsetRaw(NCreatureVisuals visuals)
+    {
+        try
+        {
+            if (visuals.GetNodeOrNull<Node2D>("%Visuals") is not { } body) return 0f;
+            GodotObject? skeleton = body.Call("get_skeleton").AsGodotObject();
+            if (skeleton == null) return 0f;
+            Rect2 b = skeleton.Call("get_bounds").AsRect2();
+            return b.Position.Y + b.Size.Y;
+        }
+        catch { return 0f; }
+    }
+
+    /// <summary>The scale this mod left on the body, i.e. what NormalizeScale decided.</summary>
+    private static float BodyScale(NCreatureVisuals visuals)
+    {
+        try { return visuals.GetNodeOrNull<Node2D>("%Visuals") is { } body ? Math.Abs(body.Scale.Y) : 0f; }
+        catch { return 0f; }
+    }
+
+    /// <summary>
     /// Enters a room, screenshots it, and asserts the squad showed up there. Generic over the room
     /// node because the campfire and the shop differ only in which type to wait for.
     /// </summary>
@@ -180,13 +272,35 @@ internal static class SoloTest
         return n;
     }
 
+    /// <summary>
+    /// Rendered height of a merchant-screen actor: skeleton bounds through both the sprite's own
+    /// scale and the actor node's. The shop rig is a bare SpineSprite child, not an
+    /// <c>NCreatureVisuals</c>, so <see cref="RenderedHeight"/> does not apply.
+    /// </summary>
+    private static float ShopRenderedHeight(Node actor)
+    {
+        try
+        {
+            float outer = actor is Node2D a ? Math.Abs(a.Scale.Y) : 1f;
+            foreach (Node child in actor.GetChildren())
+            {
+                if (child is not Node2D sprite || sprite.GetClass() != "SpineSprite") continue;
+                // Same reference pose the layout equalised on — comparing sizes at whatever frame
+                // each rig happens to be on measures animation phase, not scale.
+                return SpineSwap.MeasureBoundsAtStart(sprite).Size.Y * Math.Abs(sprite.Scale.Y) * outer;
+            }
+        }
+        catch { /* fall through */ }
+        return 0f;
+    }
+
     /// <summary>Name of the animation an actor is currently playing, or "" if none.</summary>
     private static string CurrentAnimation(NCreatureVisuals visuals)
     {
         try
         {
             if (!visuals.HasSpineAnimation) return "";
-            return visuals.SpineAnimation.GetCurrentTrack()?.GetAnimation()?.GetName() ?? "";
+            return visuals.SpineAnimation.GetCurrentAnimationName() ?? "";
         }
         catch { return ""; }
     }
@@ -307,17 +421,43 @@ internal static class SoloTest
             Ui.SkinPreview? panel = modal?.PreviewPanel;
             if (panel == null) { W("ui: no preview panel"); return false; }
 
-            var sample = SkinCatalog.Variants.Take(5).ToList();
+            // ★Every variant, not a sample. The bug this guards against is one specific skin
+            //  authored at a wildly different pixel scale, so any subset can pass while the
+            //  offender is never hovered. A five-item Take() did exactly that.
+            var sample = SkinCatalog.Variants.ToList();
             if (sample.Count < 2) { W("ui: too few skins to compare preview sizes -> SKIP"); return true; }
 
+            // Two samples of the SAME figure, half a second apart. The fit sets the figure's scale
+            // from its natural height, so every look should settle at one panel-wide height — but
+            // the measurement reads the CURRENT pose, and an idle animation moves the silhouette.
+            // Without the second sample there is no way to tell "this skin is scaled wrong" (differs
+            // across looks, stable within one) from "we caught it mid-breath" (differs within one).
             var heights = new List<(string id, float h)>();
+            float worstDrift = 1f;
+            string worstDriftId = "";
+
             foreach (SkinVariant v in sample)
             {
                 panel.Show(v.Id);
                 // Debounce (120ms) plus the fit retries have to finish before measuring.
                 await Task.Delay(700);
-                heights.Add((v.Id, panel.FittedHeight()));
+                float h1 = panel.FittedHeight();
+                await Task.Delay(500);
+                float h2 = panel.FittedHeight();
+
+                if (h1 > 1f && h2 > 1f)
+                {
+                    float drift = Math.Max(h1, h2) / Math.Min(h1, h2);
+                    if (drift > worstDrift) { worstDrift = drift; worstDriftId = v.Id; }
+                }
+
+                // The verdict uses the fit-time height, not either live sample — see
+                // SkinPreview.NormalizedHeight for why the live one cannot answer this question.
+                heights.Add((v.Id, panel.NormalizedHeight()));
             }
+
+            W($"ui: live pose swings {worstDrift:F2}x within a single idle ({worstDriftId}) — " +
+              "why the verdict below uses the fit-time height instead");
 
             var good = heights.Where(x => x.h > 1f).ToList();
             float lo = good.Count > 0 ? good.Min(x => x.h) : 0f;
@@ -551,6 +691,147 @@ internal static class SoloTest
             }
             W($"assert H: real height={realH:F0}, doubles=[{string.Join(", ", hDetail)}] -> {(hOk ? "OK" : "FAIL")}");
 
+            // N. EVERY skin in the catalogue renders at its own character's size — the combat path,
+            //    not the preview panel.
+            //
+            //    ★Why a sweep. H only ever looks at the two slots this test happens to configure, so
+            //    a single mod whose skeleton is authored at a different pixel scale sails past it.
+            //    That is precisely the reported failure mode ("one mod's skin is enormous"), and the
+            //    normalisation that prevents it (SpineSwap.NormalizeScale) reads skeleton bounds —
+            //    which is exactly the kind of thing a game update can quietly change the meaning of.
+            //
+            //    Each variant goes through the real production path (CreateBody + ApplySkin) on a
+            //    throwaway body, and is measured against the vanilla entry for the SAME character,
+            //    so body-shape differences between characters never enter into it.
+            Step("sweeping skin scale across the catalogue");
+            bool nOk = true;
+            Node? sweepParent = doubles.Count > 0 ? doubles[0].GetParent() : null;
+            var measured = new Dictionary<string, float>(StringComparer.Ordinal);
+            var footOffset = new Dictionary<string, float>(StringComparer.Ordinal);
+            var footRaw = new Dictionary<string, float>(StringComparer.Ordinal);
+            var bodyScale = new Dictionary<string, float>(StringComparer.Ordinal);
+
+            if (sweepParent == null)
+            {
+                W("assert N: no squad container to probe in -> FAIL");
+                nOk = false;
+            }
+            else
+            {
+                int probeIndex = 0;
+                foreach (SkinVariant variant in SkinCatalog.Variants)
+                {
+                    NCreatureVisuals? probe = null;
+                    try
+                    {
+                        Appearance look = Appearance.Parse(variant.Id);
+                        probe = look.CreateBody(realPlayers[0].Entity!);
+                        if (probe == null) { W($"scale probe '{variant.Id}': no body"); continue; }
+
+                        probe.Name = $"SkinSquad_ScaleProbe_{probeIndex++}";
+                        probe.Modulate = new Color(1f, 1f, 1f, 0f);   // measured, never seen
+                        sweepParent.AddChildSafely(probe);
+                        look.ApplySkin(probe);                        // needs SpineBody, so after AddChild
+                        // ★Long enough for the ground-line rechecks (0.25s / 0.75s) to land. The
+                        //  probe used to free the node after 60ms, so it measured the state BEFORE
+                        //  the correction the shipped mod actually applies — and reported a float
+                        //  that no player would ever see.
+                        await Task.Delay(900);
+
+                        measured[variant.Id] = RenderedHeight(probe);
+                        footOffset[variant.Id] = FootOffset(probe);
+                        footRaw[variant.Id] = FootOffsetRaw(probe);
+                        bodyScale[variant.Id] = BodyScale(probe);
+                    }
+                    catch (Exception ex)
+                    {
+                        W($"scale probe '{variant.Id}' threw: {ex.Message}");
+                    }
+                    finally
+                    {
+                        if (probe != null && GodotObject.IsInstanceValid(probe))
+                        {
+                            probe.GetParent()?.RemoveChild(probe);
+                            probe.QueueFree();
+                        }
+                    }
+                }
+
+                var report = new List<string>();
+                foreach (var group in SkinCatalog.Variants.GroupBy(v => v.CharacterId))
+                {
+                    SkinVariant? baseline = group.FirstOrDefault(v => v.IsVanilla);
+                    if (baseline == null || !measured.TryGetValue(baseline.Id, out float baseH) || baseH <= 1f)
+                    {
+                        report.Add($"{group.Key}: no vanilla baseline -> skipped");
+                        continue;
+                    }
+
+                    foreach (SkinVariant v in group)
+                    {
+                        if (v.Id == baseline.Id) continue;
+                        if (!measured.TryGetValue(v.Id, out float h) || h <= 1f)
+                        {
+                            report.Add($"{v.Id}=unmeasurable OUT");
+                            nOk = false;
+                            continue;
+                        }
+
+                        // A skin replaces one character's body, so it should stand that character's
+                        // height. The band is wide enough for genuine art differences (hair, pose)
+                        // and far tighter than the failures it catches (0.42x measured once, and
+                        // "enormous" is the same bug with the ratio inverted).
+                        float ratio = h / baseH;
+                        bool fits = ratio >= 0.7f && ratio <= 1.4f;
+                        if (!fits) nOk = false;
+                        report.Add($"{v.Id}={ratio:F2}x{(fits ? "" : " OUT")}");
+                    }
+                }
+
+                W($"assert N: {measured.Count}/{SkinCatalog.Variants.Count()} variant(s) measured; " +
+                  $"vs own vanilla body [{string.Join(", ", report)}] -> {(nOk ? "OK" : "FAIL")}");
+
+                // P. Feet on the ground.
+                //
+                //    ★A body is placed by its NODE ORIGIN, so what decides whether it looks planted
+                //    or floating is how far the skeleton's lowest point sits below that origin. Two
+                //    rigs authored with different origins land at different heights from identical
+                //    coordinates — and this mod also SCALES swapped bodies, which multiplies that
+                //    offset. Height asserts cannot see any of it: a floating double and a planted
+                //    one measure exactly the same height.
+                var footReport = new List<string>();
+                bool pOk = true;
+                foreach (var group in SkinCatalog.Variants.GroupBy(v => v.CharacterId))
+                {
+                    SkinVariant? baseline = group.FirstOrDefault(v => v.IsVanilla);
+                    if (baseline == null || !footOffset.TryGetValue(baseline.Id, out float baseFoot)) continue;
+
+                    foreach (SkinVariant v in group)
+                    {
+                        if (v.Id == baseline.Id || !footOffset.TryGetValue(v.Id, out float foot)) continue;
+
+                        float lift = baseFoot - foot;          // >0 = this look hovers above the vanilla ground line
+                        bool planted = Math.Abs(lift) <= 20f;  // a fifth of a body is unmistakable on screen
+                        if (!planted) pOk = false;
+                        // Absolutes, so "the art is authored this way" can be told apart from
+                        // "this mod's rescale multiplied it". A skin mounted the ordinary way in
+                        // vanilla would sit at raw x the VANILLA body's scale; here it sits at
+                        // raw x our scale.
+                        footRaw.TryGetValue(v.Id, out float raw);
+                        footRaw.TryGetValue(baseline.Id, out float rawBase);
+                        bodyScale.TryGetValue(v.Id, out float sc);
+                        bodyScale.TryGetValue(baseline.Id, out float scBase);
+
+                        float asVanillaMount = (rawBase - raw) * scBase;   // float without our rescale
+                        footReport.Add($"{v.Id}: ours={lift:+0;-0;0}px vanilla-mount={asVanillaMount:+0;-0;0}px " +
+                                       $"(raw {raw:F0} vs {rawBase:F0}, scale x{sc:F3} vs x{scBase:F3})" +
+                                       $"{(planted ? "" : " FLOATS")}");
+                    }
+                }
+                W($"assert P: foot line vs own vanilla body [{string.Join(", ", footReport)}] -> {(pOk ? "OK" : "FAIL")}");
+                nOk = nOk && pOk;
+            }
+
             // I. Animation mirroring: driving the real character's trigger must move the doubles off
             //    their idle. Checked by animation NAME, not by "did we call something" — a mirrored
             //    trigger that silently no-ops (missing animator, stale skeleton after a skin swap)
@@ -594,16 +875,127 @@ internal static class SoloTest
             bool jOk = await CheckRoom<NRestSiteRoom>(RoomType.RestSite, "5_restsite", "J", "rest site",
                 room => CountSquadNodes(room));
 
+            // O-control. The shop with the squad OFF, measured and shot first.
+            //
+            // ★Why a control run. The shop actor's size comes from the character's own
+            // {char}_shop scene; nothing in the game's AfterRoomIsLoaded scales it, and neither
+            // does this mod. So "the shop figure is enormous" can equally mean the scene is simply
+            // drawn that close — and comparing squad members against the real player cannot tell
+            // the two apart, because if everyone is enormous every ratio is 1.0 and the check
+            // passes while the screen is full of giants. The only measurement that separates them
+            // is the SAME real player, with and without this mod.
+            Step("measuring the shop with the squad off (control)");
+            int savedCount = SkinSquadService.DoubleCount;
+            SkinSquadService.DoubleCount = 0;
+            float controlRealH = 0f;
+            {
+                var run2 = RunManager.Instance;
+                if (run2 != null)
+                {
+                    await run2.EnterRoomDebug(RoomType.Shop, showTransition: false);
+                    NMerchantRoom? ctrl = null;
+                    for (int i = 0; i < 40 && ctrl == null; i++)
+                    {
+                        await Task.Delay(250);
+                        if (Engine.GetMainLoop() is SceneTree t2) ctrl = FindNode<NMerchantRoom>(t2.Root);
+                    }
+                    await Task.Delay(1200);
+                    await Shot("7_shop_control");
+
+                    NMerchantCharacter? realCtrl = ctrl?._playerVisuals
+                        .Where(GodotObject.IsInstanceValid)
+                        .FirstOrDefault(m => !m.Name.ToString().StartsWith(SquadRooms.NodePrefix, StringComparison.Ordinal));
+                    controlRealH = realCtrl != null ? ShopRenderedHeight(realCtrl) : 0f;
+                    W($"shop control: squad off, real body height={controlRealH:F0}, " +
+                      $"members={ctrl?._playerVisuals.Count ?? -1}");
+                }
+            }
+            SkinSquadService.DoubleCount = savedCount;
+
+            // ★The shop is a THIRD skeleton ({char}_shop), and a look only exercises the swap there
+            //  if it actually ships a shop rig — most do not. Without this, the shop check enters
+            //  with a look whose ApplyShopSkin returns immediately, so the swap path is never run
+            //  and O below would be measuring stock bodies and calling it a pass.
             Step("entering the shop");
+            string? shopRigLook = SkinCatalog.Variants
+                .Select(v => v.Id)
+                .FirstOrDefault(id => Appearance.Parse(id).RigFor(SkinRig.Shop) != null);
+
+            if (shopRigLook != null)
+            {
+                SkinSquadService.SlotTokens[0] = shopRigLook;
+                W($"shop: slot 0 set to '{shopRigLook}' (the catalogue's shop-rig look)");
+            }
+            else
+            {
+                W("shop: no installed look ships a shop rig — O cannot exercise the swap path");
+            }
+
             bool kOk = await CheckRoom<NMerchantRoom>(RoomType.Shop, "6_shop", "K", "shop",
                 room => CountSquadNodes(room));
+
+            // O. The shop places the party on the game's co-op grid, and changes nothing else.
+            //
+            //    ★Positions are the whole assertion now. Sizes on this screen are deliberately
+            //    left at whatever each look was authored at, so there is nothing to check there —
+            //    except that the real player's body is untouched, which catches the mod scaling an
+            //    actor it does not own.
+            //
+            //    The expected coordinates are written out from the decompiled
+            //    NMerchantRoom.AfterRoomIsLoaded rather than read back from SquadRooms, so a change
+            //    to the layout code cannot quietly redefine what "correct" means.
+            Step("measuring shop-screen placement");
+            bool oOk = true;
+            {
+                NMerchantRoom? shopRoom = Engine.GetMainLoop() is SceneTree st ? FindNode<NMerchantRoom>(st.Root) : null;
+                if (shopRoom == null)
+                {
+                    W("assert O: no merchant room to measure -> FAIL");
+                    oOk = false;
+                }
+                else
+                {
+                    var members = shopRoom._playerVisuals.Where(GodotObject.IsInstanceValid).ToList();
+                    int cols = (int)Math.Ceiling(Math.Sqrt(members.Count));
+                    var report = new List<string>();
+
+                    for (int row = 0, index = 0; row < cols && index < members.Count; row++)
+                    {
+                        float x = -140f * row;
+                        for (int col = 0; col < cols && index < members.Count; col++, index++)
+                        {
+                            NMerchantCharacter member = members[index];
+                            var want = new Vector2(x, -50f * row);
+                            Vector2 got = member.Position;
+                            bool at = got.DistanceTo(want) < 1f;
+                            if (!at) oOk = false;
+
+                            report.Add($"{member.Name.ToString().Replace(SquadRooms.NodePrefix, "")}" +
+                                       $"@({got.X:F0},{got.Y:F0}){(at ? "" : $" WANT ({want.X:F0},{want.Y:F0})")}");
+                            x -= 275f;
+                        }
+                    }
+
+                    NMerchantCharacter? realMember = members.FirstOrDefault(
+                        m => !m.Name.ToString().StartsWith(SquadRooms.NodePrefix, StringComparison.Ordinal));
+                    float shopRealH = realMember != null ? ShopRenderedHeight(realMember) : 0f;
+                    float drift = controlRealH > 1f && shopRealH > 1f ? shopRealH / controlRealH : 0f;
+                    bool realUntouched = drift > 0.97f && drift < 1.03f;
+                    if (!realUntouched) oOk = false;
+
+                    W($"assert O: co-op grid [{string.Join(", ", report)}]; " +
+                      $"real body squad-off={controlRealH:F0} squad-on={shopRealH:F0} " +
+                      $"({drift:F2}x, {(realUntouched ? "untouched" : "RESIZED BY THE MOD")}) " +
+                      $"-> {(oOk ? "OK" : "FAIL")}");
+                }
+            }
 
             // L. The in-game picker: a button on the character-select screen that opens the modal.
             bool lOk = _uiButtonFound && _uiModalOpened && _uiDragOk && _uiPreviewOk;
             W($"assert L: squad button={_uiButtonFound}, picker opened={_uiModalOpened}, " +
               $"drag stays on screen={_uiDragOk}, preview sizes uniform={_uiPreviewOk} -> {(lOk ? "OK" : "FAIL")}");
 
-            ok = aOk && bOk && cOk && dOk && eOk && fOk && gOk && hOk && iOk && jOk && kOk && lOk && mOk;
+            ok = aOk && bOk && cOk && dOk && eOk && fOk && gOk && hOk && iOk && jOk && kOk && lOk && mOk && nOk && oOk;
             W($"assert -> {ok}");
 
             await Shot("3_final");
@@ -764,6 +1156,11 @@ internal static class SoloTest
         _done = true;
         _selectorScope?.Dispose();
         _selectorScope = null;
+
+        // Before writing the result, and on every exit path including the watchdog and a failed
+        // run — a half-finished test is exactly the one that leaves a stray look behind.
+        RestoreSettings();
+
         _out.Insert(0, (ok ? "RESULT: OK\n" : "RESULT: FAIL\n"));
         try { File.WriteAllText(Path.Combine(ModDir(), "selftest.sp.txt"), _out.ToString()); } catch { }
     }

@@ -47,12 +47,24 @@ internal static class SquadRooms
         try
         {
             IRunState? state = RunManager.Instance?.State;
-            if (state == null) return;
-            if (state.Players.Count != 1) return;                  // single-player only, as everywhere else
-            if (room.characterAnims.Count != 1) return;            // room did not lay out a solo party
 
-            CharacterModel? playerCharacter = state.Players[0].Character;
-            if (playerCharacter == null) return;
+            // Named reasons rather than bare returns: when a game update moves when the room builds
+            // its characters, the campfire silently holds one actor and nothing says why. That cost
+            // a full verify cycle on v0.110.1 to narrow down.
+            string? skip =
+                state == null ? "no run state"
+                : state.Players.Count != 1 ? $"party of {state.Players.Count}"      // single-player only
+                : room.characterAnims.Count != 1 ? $"room laid out {room.characterAnims.Count} character(s)"
+                : state.Players[0].Character == null ? "player has no character"
+                : null;
+
+            if (skip != null)
+            {
+                MainFile.Logger.Info($"[{MainFile.ModId}] rest site: no squad ({skip}).");
+                return;
+            }
+
+            CharacterModel playerCharacter = state!.Players[0].Character!;
 
             List<Control> containers = room._characterContainers;
             int placed = 0;
@@ -159,10 +171,9 @@ internal static class SquadRooms
         {
             try
             {
-                var track = new MegaSprite(spine).GetAnimationState().SetAnimation(loop);
                 // Desynchronise the loops so the squad does not breathe in lockstep. Rng.Chaotic is
                 // time-seeded and independent of the run seed, exactly as the game's own code here.
-                track?.SetTrackTime(track.GetAnimationEnd() * MegaCrit.Sts2.Core.Random.Rng.Chaotic.NextFloat());
+                SpineCompat.PlayDesynced(spine, loop, MegaCrit.Sts2.Core.Random.Rng.Chaotic.NextFloat());
             }
             catch (Exception ex)
             {
@@ -250,6 +261,15 @@ internal static class SquadRooms
         }
     }
 
+    /// <summary>
+    /// Swaps in the shop skin at the size its author drew it.
+    ///
+    /// ★NO SCALE NORMALISATION HERE, unlike the combat and campfire rigs. On this screen each look
+    /// is wanted at its own authored size, so nothing is measured and nothing is corrected —
+    /// which also removes every failure mode that measuring brought with it (a spine skeleton
+    /// loads asynchronously, so a measurement taken next to instantiation is either empty or a
+    /// setup pose, and a bad reference produces a wrong scale rather than none).
+    /// </summary>
     private static void ApplyShopSkin(NMerchantCharacter node, Appearance look)
     {
         RigFiles? files = look.RigFor(SkinRig.Shop);
@@ -257,17 +277,34 @@ internal static class SquadRooms
 
         foreach (Node2D spine in SpineChildren(node))
         {
-            if (SpineSwap.ApplyToSprite(spine, files.AtlasFile, files.SkelFile, restartAnimation: null)) break;
+            if (SpineSwap.ApplyToSprite(spine, files.AtlasFile, files.SkelFile,
+                                        restartAnimation: null, normalizeScale: false)) break;
         }
     }
-
     /// <summary>
-    /// Transliteration of the grid in <c>NMerchantRoom.AfterRoomIsLoaded</c>, run over the whole
-    /// squad so the real player shifts to make room instead of the doubles piling on top of it.
+    /// The multiplayer shop placement, re-run over the whole squad — the ONLY thing this mod
+    /// changes about a merchant actor.
+    ///
+    /// Transliterated from <c>NMerchantRoom.AfterRoomIsLoaded</c>, which is the single place the
+    /// game assigns a shop character's position, so a solo squad of N stands exactly where a co-op
+    /// party of N would:
+    /// <code>
+    ///   cols = ceil(sqrt(count))
+    ///   row r: x starts at -140*r, y = -50*r, and x steps -275 per column
+    ///   rows past the first are dimmed to (0.5, 0.5, 0.5)
+    /// </code>
+    /// Re-running it over the whole party — rather than only placing the new members — is what
+    /// makes the real player shift aside instead of the doubles piling onto it, exactly as the
+    /// game does when a second player joins.
+    ///
+    /// ★Positions only. Sizes are whatever each look was authored at; see
+    /// <see cref="ApplyShopSkin"/>.
     /// </summary>
     private static void LayoutShop(List<NMerchantCharacter> members)
     {
         int cols = Mathf.CeilToInt(Mathf.Sqrt(members.Count));
+        var placed = new List<string>();
+
         for (int row = 0; row < cols; row++)
         {
             float x = ShopRowXStep * row;
@@ -280,7 +317,13 @@ internal static class SquadRooms
                 member.Position = new Vector2(x, ShopRowYStep * row);
                 if (row > 0) member.Modulate = DimColor;
                 x += ShopColumnStep;
+
+                placed.Add($"{member.Name}@({member.Position.X:F0},{member.Position.Y:F0})");
             }
         }
+
+        // Logged so a co-op session can be compared against it directly.
+        MainFile.Logger.Info($"[{MainFile.ModId}] shop: co-op grid for {members.Count} " +
+                             $"[{string.Join(", ", placed)}].");
     }
 }
