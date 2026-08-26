@@ -327,7 +327,8 @@ internal static class SkinSquadService
             {
                 // Animator last: it binds to the CURRENT skeleton, so building it before the skin
                 // swap would leave it driving data the sprite no longer holds.
-                Animator = BuildAnimator(body, look.ResolveCharacter() ?? playerEntity.Player?.Character, monster: null),
+                Animator = BuildAnimator(body, look.ResolveCharacter() ?? playerEntity.Player?.Character, monster: null,
+                                         lowHealthSource: playerEntity),
                 Player = FindAnimationPlayer(body),
             };
 
@@ -519,8 +520,12 @@ internal static class SkinSquadService
     /// seeks into the current track without a null check when its initial state is the idle, so a
     /// skin missing that animation would take the combat down with it. Returning null degrades to a
     /// still (but breathing) double instead.
+    ///
+    /// The character call goes through <see cref="AnimatorCompat"/> because its parameter list is
+    /// not the same on every branch; the monster call is unchanged and stays direct.
     /// </summary>
-    private static CreatureAnimator? BuildAnimator(NCreatureVisuals body, CharacterModel? character, MonsterModel? monster)
+    private static CreatureAnimator? BuildAnimator(
+        NCreatureVisuals body, CharacterModel? character, MonsterModel? monster, Creature? lowHealthSource = null)
     {
         try
         {
@@ -532,7 +537,18 @@ internal static class SkinSquadService
             // looked skin-dependent.
             SpineSwap.PlayOn(body.GetNodeOrNull<Node2D>("%Visuals")!, IdleAnimation);
 
-            if (character != null) return character.GenerateAnimator(body.SpineBody!);
+            if (character != null)
+            {
+                if (lowHealthSource == null)
+                {
+                    MainFile.Logger.Warn(
+                        $"[{MainFile.ModId}] '{body.Name}': no creature to read health from; " +
+                        "mirroring disabled for it.");
+                    return null;
+                }
+                WarnIfNoLowHealthIdle(body);
+                return AnimatorCompat.Build(character, body.SpineBody!, lowHealthSource);
+            }
             if (monster != null) return monster.GenerateAnimator(body.SpineBody!);
             return null;
         }
@@ -540,6 +556,28 @@ internal static class SkinSquadService
         {
             MainFile.Logger.Warn($"[{MainFile.ModId}] '{body.Name}': animator failed ({ex.Message}); mirroring disabled for it.");
             return null;
+        }
+    }
+
+    /// <summary>
+    /// Notes a rig that cannot play the idle v0.111.0's animator selects below a quarter health.
+    ///
+    /// Nothing to fix here — the clip either exists in the donor skeleton or it does not, and a
+    /// missing one is the same soft failure as a missing <c>attack</c>: the transition fires and the
+    /// copy holds its pose until health climbs back. Logged because the symptom (one squad member
+    /// going still, but only in the back half of a hard fight) is otherwise very hard to place.
+    /// </summary>
+    private static void WarnIfNoLowHealthIdle(NCreatureVisuals body)
+    {
+        if (!AnimatorCompat.HasLowHealthIdle) return;
+        if (body.GetNodeOrNull<Node2D>("%Visuals") is not { } sprite) return;
+
+        if (!SpineSwap.AnimationNames(sprite).Contains(
+                AnimatorCompat.LowHealthAnimation, StringComparer.OrdinalIgnoreCase))
+        {
+            MainFile.Logger.Info(
+                $"[{MainFile.ModId}] '{body.Name}' has no '{AnimatorCompat.LowHealthAnimation}'; " +
+                "it will hold its pose while you are below a quarter health.");
         }
     }
 

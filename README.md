@@ -5,7 +5,7 @@ combat, laid out exactly where co-op teammates would stand — so a solo run loo
 Each squad member gets its own look: the vanilla art, an installed skin mod, or another character
 entirely.
 
-Status: **v0.13.7** — published on the Steam Workshop
+Status: **v0.13.8** — published on the Steam Workshop
 ([3774905195](https://steamcommunity.com/sharedfiles/filedetails/?id=3774905195)).
 
 ## What it does
@@ -173,6 +173,26 @@ expected; `squadanim win` is the only way to see whether a given skin even has t
   directory — ATA_IronClad and ATA_Silent both show up in practice.
 - A skin can only be worn by the character it was authored for; bone names would not line up
   otherwise.
+
+## Game-branch compatibility
+
+One Workshop item ships one payload, so the same DLL has to serve players on `public` and on
+`public-beta`. Nothing here may bind to a shape that exists on only one of them.
+
+Two spots are late-bound for that reason, each with the details in its own file:
+
+- `SpineCompat.cs` — `SetAnimation` changed return type in v0.110.0, and `MegaSpineBinding`
+  became `IDisposable` (disposing the wrong wrapper destroys live scene objects).
+- `AnimatorCompat.cs` — v0.111.0 gave characters a low-health idle, so
+  `CharacterModel.GenerateAnimator(MegaSprite)` became `GenerateAnimator(MegaSprite, Creature)`
+  and the one-argument form was removed.
+
+> A parameter or return type that drifts does not fail at the call site. It throws
+> `MissingMethodException` when the method *holding* the call is JITted, which is outside the
+> `try` around the call — so it surfaces somewhere unrelated, or gets swallowed by an outer
+> handler and reads as "the mod loads but does nothing". Compiling successfully against one
+> branch is not evidence of compatibility with the other; the member references have to be
+> checked against both game builds.
 
 ## Building
 
